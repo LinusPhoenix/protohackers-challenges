@@ -5,3 +5,8 @@ export type DropEvent = {
   remotePort: number;
   remoteFamily: string;
 };
+
+export type BindOptions = {
+  host: string;
+  port: number;
+};

@@ -1,48 +1,49 @@
 import * as net from "net";
 import { GlobalConfig } from "../config";
-import { DropEvent } from "../util/events";
+import { BindOptions, DropEvent } from "../util/types";
 
-console.log("Creating TCP echo server...");
-const echoServer = net.createServer();
+export class TcpEchoServer {
+  private readonly server = net.createServer();
 
-echoServer.on("connection", (conn: net.Socket) => {
-  console.log(`${conn.remoteAddress}:${conn.remotePort} connected.`);
+  constructor(private readonly options: BindOptions) {
+    this.server.on("connection", (conn: net.Socket) => {
+      console.log(`${conn.remoteAddress}:${conn.remotePort} connected.`);
 
-  conn.on("data", (data: Buffer | string) => {
-    if (typeof data === "string") {
-      console.log(
-        `Received message from ${conn.remoteAddress}:${conn.remotePort}:`
+      conn.on("data", (data: Buffer | string) => {
+        if (typeof data === "string") {
+          console.log(
+            `Received ${data.length} characters from ${conn.remoteAddress}:${conn.remotePort}.`
+          );
+        } else {
+          console.log(
+            `Received ${data.byteLength} bytes from ${conn.remoteAddress}:${conn.remotePort}.`
+          );
+        }
+        conn.write(data);
+      });
+
+      conn.on("end", () => {
+        console.log(`${conn.remoteAddress}:${conn.remotePort} disconnected.`);
+      });
+    });
+
+    this.server.on("close", () => {
+      console.log("TCP server echo closed.");
+    });
+
+    this.server.on("drop", (data: DropEvent) => {
+      console.warn(
+        `Dropping new connection from ${data.remoteAddress}:${data.remotePort}: 
+          Too many open connections (max. ${this.server.maxConnections}).`
       );
-      console.log(data);
-    } else {
-      console.log(
-        `Received ${data.byteLength} bytes from ${conn.remoteAddress}:${conn.remotePort}.`
-      );
-    }
-    conn.write(data);
-  });
+    });
 
-  conn.on("end", () => {
-    console.log(`${conn.remoteAddress}:${conn.remotePort} disconnected.`);
-  });
-});
+    this.server.on("error", (err) => {
+      throw err;
+    });
+  }
 
-echoServer.on("close", () => {
-  console.log("TCP server echo closed.");
-});
-
-echoServer.on("drop", (data: DropEvent) => {
-  console.warn(
-    `Dropping new connection from ${data.remoteAddress}:${data.remotePort}: 
-    Too many open connections (max. ${echoServer.maxConnections}).`
-  );
-});
-
-echoServer.on("error", (err) => {
-  throw err;
-});
-
-console.log(
-  `Listening for connections on ${GlobalConfig.BIND_ADDRESS}:${GlobalConfig.PORT} (Press CTRL+C to exit)...`
-);
-echoServer.listen(GlobalConfig.PORT, GlobalConfig.BIND_ADDRESS);
+  listen() {
+    this.server.listen(GlobalConfig.PORT, GlobalConfig.BIND_ADDRESS);
+  }
+}
