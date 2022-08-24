@@ -44,6 +44,6 @@ export class TcpEchoServer {
   }
 
   listen() {
-    this.server.listen(GlobalConfig.PORT, GlobalConfig.BIND_ADDRESS);
+    this.server.listen(this.options.port, this.options.host);
   }
 }
