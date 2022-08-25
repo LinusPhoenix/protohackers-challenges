@@ -1,5 +1,4 @@
 import * as net from "net";
-import { GlobalConfig } from "../config";
 import { BindOptions, DropEvent } from "../util/types";
 
 export class TcpEchoServer {
