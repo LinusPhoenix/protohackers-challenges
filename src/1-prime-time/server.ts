@@ -6,8 +6,8 @@ export class TcpJsonServer<Req, Res> {
 
   constructor(
     private readonly options: BindOptions,
-    requestHandler: (req: Req) => Res,
-    requestValidator?: (req: Req) => boolean
+    private readonly requestHandler: (req: Req) => Res,
+    private readonly requestValidator?: (req: Req) => boolean
   ) {
     this.server.on("connection", (conn: net.Socket) => {
       console.log(`${conn.remoteAddress}:${conn.remotePort} connected.`);
@@ -18,7 +18,7 @@ export class TcpJsonServer<Req, Res> {
         }
 
         console.log(
-          `Received request from ${conn.remoteAddress}:${conn.remotePort}:`
+          `Received request(s) from ${conn.remoteAddress}:${conn.remotePort}:`
         );
         console.log(data);
 
@@ -34,29 +34,11 @@ export class TcpJsonServer<Req, Res> {
           return;
         }
 
-        let request: any;
-        try {
-          request = JSON.parse(data);
-        } catch (err) {
-          this.closeClientConnection(conn, "Malformed request (is not a JSON)");
-          return;
-        }
+        const requestsRaw = data.split("\n");
 
-        if (requestValidator && !requestValidator(request as Req)) {
-          this.closeClientConnection(
-            conn,
-            "Malformed request (request validator)"
-          );
-          return;
+        for (const requestRaw of requestsRaw) {
+          this.handleRawRequest(conn, requestRaw);
         }
-
-        const response = requestHandler(request as Req);
-        const responseJson = JSON.stringify(response);
-        console.log(
-          `Sending response to ${conn.remoteAddress}:${conn.remotePort}:`
-        );
-        console.log(responseJson);
-        conn.write(`${responseJson}\n`);
       });
 
       conn.on("end", () => {
@@ -81,9 +63,33 @@ export class TcpJsonServer<Req, Res> {
   }
 
   private closeClientConnection(conn: net.Socket, message: string) {
+    console.warn(message);
     console.warn("Received malformed request. Closing client connection.");
     conn.write(`${message}\n`);
     conn.destroy();
+  }
+
+  private handleRawRequest(conn: net.Socket, requestRaw: string) {
+    let request: any;
+    try {
+      request = JSON.parse(requestRaw);
+    } catch (err) {
+      this.closeClientConnection(conn, "Malformed request (is not a JSON)");
+      return;
+    }
+
+    if (this.requestValidator && !this.requestValidator(request as Req)) {
+      this.closeClientConnection(conn, "Malformed request (request validator)");
+      return;
+    }
+
+    const response = this.requestHandler(request as Req);
+    const responseJson = JSON.stringify(response);
+    console.log(
+      `Sending response to ${conn.remoteAddress}:${conn.remotePort}:`
+    );
+    console.log(responseJson);
+    conn.write(`${responseJson}\n`);
   }
 
   listen() {
