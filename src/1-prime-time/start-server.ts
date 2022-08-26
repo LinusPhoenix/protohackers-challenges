@@ -22,7 +22,7 @@ const requestSchema = {
       enum: ["isPrime"],
     },
     number: {
-      type: "integer",
+      type: "number",
     },
   },
 };
