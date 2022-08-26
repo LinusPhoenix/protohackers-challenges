@@ -12,32 +12,31 @@ export class TcpJsonServer<Req, Res> {
     this.server.on("connection", (conn: net.Socket) => {
       console.log(`${conn.remoteAddress}:${conn.remotePort} connected.`);
 
+      let strBuffer = "";
+
       conn.on("data", (data: Buffer | string) => {
         if (data instanceof Buffer) {
           data = data.toString("utf8");
         }
 
         console.log(
-          `Received request(s) from ${conn.remoteAddress}:${conn.remotePort}:`
+          `Received data from ${conn.remoteAddress}:${conn.remotePort}:`
         );
-        console.log(data);
 
-        if (data.endsWith("\r\n")) {
-          data = data.substring(0, data.length - 2);
-        } else if (data.endsWith("\n")) {
-          data = data.substring(0, data.length - 1);
+        const isCompleteRequest = data.endsWith("\n");
+
+        const requestsRaw = (strBuffer + data).split("\n").filter((s) => s);
+
+        if (isCompleteRequest) {
+          for (const requestRaw of requestsRaw) {
+            this.handleRawRequest(conn, requestRaw);
+          }
+          strBuffer = "";
         } else {
-          this.closeClientConnection(
-            conn,
-            'Malformed request (does not end in "\\r\\n" or "\\n")'
-          );
-          return;
-        }
-
-        const requestsRaw = data.split("\n");
-
-        for (const requestRaw of requestsRaw) {
-          this.handleRawRequest(conn, requestRaw);
+          for (const requestRaw of requestsRaw.slice(0, -1)) {
+            this.handleRawRequest(conn, requestRaw);
+          }
+          strBuffer = strBuffer + requestsRaw[requestsRaw.length - 1];
         }
       });
 
@@ -70,6 +69,11 @@ export class TcpJsonServer<Req, Res> {
   }
 
   private handleRawRequest(conn: net.Socket, requestRaw: string) {
+    console.log(
+      `Handling request from ${conn.remoteAddress}:${conn.remotePort}:`
+    );
+    console.log(requestRaw);
+
     let request: any;
     try {
       request = JSON.parse(requestRaw);
