@@ -13,25 +13,17 @@ export class TcpBinaryServer {
     ) => Buffer | undefined
   ) {
     this.server.on("connection", (conn: net.Socket) => {
-      console.log(`${conn.remoteAddress}:${conn.remotePort} connected.`);
+      const clientId = v4();
+      console.log(`${clientId} connected.`);
 
       let connBuffer = Buffer.alloc(0);
-      const clientId = v4();
 
       conn.on("data", (data: Buffer | string) => {
         if (typeof data === "string") {
           data = Buffer.from(data, "utf8");
         }
-        console.log(
-          `Received data from ${conn.remoteAddress}:${conn.remotePort}:`
-        );
-        console.log(data);
 
         if (connBuffer.byteLength > 0) {
-          console.log(
-            `Prefixing leftover data from ${conn.remoteAddress}:${conn.remotePort}:`
-          );
-          console.log(connBuffer);
           data = Buffer.concat([connBuffer, data]);
         }
 
@@ -39,31 +31,25 @@ export class TcpBinaryServer {
           const request = data.subarray(0, 9);
           data = data.subarray(9, data.byteLength);
 
-          console.log(
-            `Handling request from ${conn.remoteAddress}:${conn.remotePort}:`
-          );
+          console.log(`Handling request from ${clientId}:`);
           console.log(request);
           const response = this.requestHandler(clientId, request);
           if (response) {
-            console.log(
-              `Sending response to ${conn.remoteAddress}:${conn.remotePort}:`
-            );
+            console.log(`Sending response to ${clientId}:`);
             console.log(response);
             conn.write(response);
           }
         }
 
         if (data.byteLength > 0) {
-          console.log(
-            `Saving leftover data from ${conn.remoteAddress}:${conn.remotePort}:`
-          );
-          console.log(data);
           connBuffer = data;
+        } else {
+          connBuffer = Buffer.alloc(0);
         }
       });
 
       conn.on("end", () => {
-        console.log(`${conn.remoteAddress}:${conn.remotePort} disconnected.`);
+        console.log(`${clientId} disconnected.`);
       });
     });
 
