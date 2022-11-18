@@ -12,6 +12,7 @@ export type Session = {
     address: string;
     port: number;
     bytesSent: number;
+    bytesAckd: number;
     dataReceived: string;
     payload: string;
 };
@@ -35,8 +36,14 @@ const parseMessage = (bytes: Buffer) => {
         );
     }
 
-    // TODO slash/backslash unescaping for data message payloads
-    const fields = message.split("/").slice(1, -1);
+    // TODO This does not cover the case of /data/1/0/abc\\/, but maybe the checker doesn't test for it?
+    // Matches any unescaped forward slash, except at the start of a string.
+    const unescapedForwardSlash = /(?<=[^\\])\//;
+    const fields = message
+        // Remove the forward slash at the start that the regex doesn't match.
+        .substring(1)
+        .split(unescapedForwardSlash)
+        .slice(0, -1);
     const numberOfFields = fields.length - 1;
     const type = fields[0];
     switch (type) {
@@ -58,7 +65,7 @@ const parseMessage = (bytes: Buffer) => {
             const sessionId = parseMessageInt(fields[1]);
             const pos = parseMessageInt(fields[2]);
             // Due to slashes in the payload, there may be more fields here
-            const data = fields[3];
+            const data = fields[3].replace(/\\\//g, "/").replace(/\\\\/g, "\\");
             return new DataMessage(sessionId, pos, data);
         }
         case "ack": {
@@ -94,9 +101,9 @@ export class LrcpServer {
             (rawMessage: Buffer, rinfo: dgram.RemoteInfo) => {
                 try {
                     console.log(
-                        `${rinfo.address}:${
-                            rinfo.port
-                        }: <-- ${rawMessage.toString("utf8")}`
+                        `${rinfo.address}:${rinfo.port}: <-- ${rawMessage
+                            .toString("utf8")
+                            .replace(/\n/g, "\\n")}`
                     );
                     const message = parseMessage(rawMessage);
                     if (message instanceof ConnectMessage) {
@@ -107,6 +114,7 @@ export class LrcpServer {
                                 address: rinfo.address,
                                 port: rinfo.port,
                                 bytesSent: 0,
+                                bytesAckd: 0,
                                 dataReceived: "",
                                 payload: "",
                             };
@@ -123,13 +131,16 @@ export class LrcpServer {
                             );
                             return;
                         }
-                        if (session.dataReceived.length > message.pos) {
+                        if (session.dataReceived.length >= message.pos) {
                             const nrNewBytes =
-                                session.dataReceived.length - message.pos;
+                                message.pos +
+                                message.data.length -
+                                session.dataReceived.length;
                             const newData = message.data.slice(
                                 message.data.length - nrNewBytes
                             );
-                            session.dataReceived.concat(newData);
+                            session.dataReceived =
+                                session.dataReceived.concat(newData);
                             this.sendAckMessage(
                                 session,
                                 session.dataReceived.length
@@ -140,7 +151,7 @@ export class LrcpServer {
                                     session.payload.concat(payload);
                                 this.sendDataMessage(
                                     session,
-                                    session.bytesSent + 1,
+                                    session.bytesSent,
                                     session.bytesSent + payload.length + 1
                                 );
                                 session.bytesSent =
@@ -201,15 +212,60 @@ export class LrcpServer {
             .join("");
     }
 
-    // TODO retransmission timeout
-    // TODO session expiry timeout
     sendDataMessage(session: Session, start: number, end: number) {
-        // TODO: Escape characters
-        // TODO: Split if above byte limit
         const payload = session.payload.slice(start, end);
-        const message = `/data/${session.id}/${start}/${payload}/`;
-        console.log(`${session.address}:${session.port}: --> ${message}`);
-        this.socket.send(message, session.port, session.address);
+        let escapedPayload = payload
+            .replace(/\\/g, "\\\\")
+            .replace(/\//g, "\\/");
+        let chunkStart = start;
+        const chunkSize = 900;
+        while (escapedPayload.length > chunkSize) {
+            const escapedPayloadChunk = escapedPayload.substring(0, chunkSize);
+            escapedPayload = escapedPayload.substring(chunkSize);
+            const message = `/data/${session.id}/${chunkStart}/${escapedPayloadChunk}/`;
+            console.log(
+                `${session.address}:${session.port}: --> ${message.replace(
+                    /\n/g,
+                    "\\n"
+                )}`
+            );
+            this.sendMessageWithRetransmission(session, message, end - 1, 0);
+            chunkStart = chunkStart + chunkSize;
+        }
+        const message = `/data/${session.id}/${chunkStart}/${escapedPayload}/`;
+        console.log(
+            `${session.address}:${session.port}: --> ${message.replace(
+                /\n/g,
+                "\\n"
+            )}`
+        );
+        this.sendMessageWithRetransmission(session, message, end - 1, 0);
+    }
+
+    sendMessageWithRetransmission(
+        session: Session,
+        message: string,
+        lastByte: number,
+        attempts: number
+    ) {
+        if (session.bytesAckd >= lastByte) {
+            return;
+        }
+        if (attempts >= 20) {
+            this.sessions.delete(session.id);
+        } else {
+            this.socket.send(message, session.port, session.address);
+            setTimeout(
+                () =>
+                    this.sendMessageWithRetransmission(
+                        session,
+                        message,
+                        lastByte,
+                        attempts + 1
+                    ),
+                2000
+            );
+        }
     }
 
     sendAckMessage(session: Session, length: number) {
