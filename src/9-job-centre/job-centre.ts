@@ -56,14 +56,33 @@ export class JobCentre {
         }
     }
 
-    processClientDisconnect(clientId: number) {
+    processClientDisconnect(clientId: number): JobCentreResult {
         const jobs = this.jobsByClient.get(clientId) || [];
         this.jobsByClient.delete(clientId);
         this.waitingQueuesByClient.delete(clientId);
+        const result: JobCentreResult = [];
         for (const job of jobs) {
-            const queue = this.getOrCreateQueue(job.queue);
-            queue.jobs.push(job);
+            // Check if any clients are waiting for this queue.
+            const waitingClient = this.findWaitingClient(job.queue);
+            if (waitingClient == null) {
+                const queue = this.getOrCreateQueue(job.queue);
+                queue.jobs.push(job);
+            } else {
+                this.trackJob(waitingClient, job);
+                this.waitingQueuesByClient.delete(waitingClient);
+                result.push({
+                    recipient: waitingClient,
+                    response: {
+                        status: "ok",
+                        id: job.id,
+                        job: job.job,
+                        pri: job.priority,
+                        queue: job.queue,
+                    },
+                });
+            }
         }
+        return result;
     }
 
     private processPutRequest(
@@ -126,19 +145,9 @@ export class JobCentre {
         const queues: JobQueue[] = [];
         for (const queueName of request.queues) {
             const queue = this.queues.get(queueName);
-            // If one of the queues does not exist, return an error response.
-            if (queue == null) {
-                return [
-                    {
-                        recipient: clientId,
-                        response: {
-                            status: "error",
-                            error: `There is no queue with name ${queueName}.`,
-                        },
-                    },
-                ];
+            if (queue != null) {
+                queues.push(queue);
             }
-            queues.push(queue);
         }
         const job = this.popHighestPrioJob(queues);
         if (job == null) {

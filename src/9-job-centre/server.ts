@@ -50,6 +50,13 @@ export class JobCentreServer {
             this.clients.set(id, conn);
             console.log(`Client ${id} connected.`);
 
+            conn.on("end", () => {
+                console.log(`Client ${id} disconnected.`);
+                this.clients.delete(id);
+                const result = this.jobCentre.processClientDisconnect(id);
+                this.sendResponses(result);
+            });
+
             for await (const requestRaw of receive(conn)) {
                 let result: JobCentreResult;
                 console.log(`<--(${id}) ${requestRaw}`);
@@ -70,12 +77,6 @@ export class JobCentreServer {
                 }
                 this.sendResponses(result);
             }
-
-            conn.on("end", () => {
-                console.log(`Client ${id} disconnected.`);
-                this.clients.delete(id);
-                this.jobCentre.processClientDisconnect(id);
-            });
         });
         this.server.on("close", () => console.log("TCP server closed."));
         this.server.on("drop", (data: DropEvent) => {
